@@ -4,7 +4,7 @@ import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import { analyzeMarkdown } from '@/src/backend/services/articleAnalysis.js'
+import { analyzeMarkdown } from '../services/articleAnalysis'
 
 const isAnalyzing = ref(false)
 const analysisResult = ref(null)
