@@ -4,6 +4,35 @@ import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import { analyzeMarkdown } from '@/src/backend/services/articleAnalysis.js'
+
+const isAnalyzing = ref(false)
+const analysisResult = ref(null)
+const analysisError = ref('')
+
+async function handleAnalyze() {
+  if (isAnalyzing.value) return
+
+  if (!markdownSource.value.trim()) {
+    analysisError.value = 'Markdown記事を入力してください。'
+    return
+  }
+
+  isAnalyzing.value = true
+  analysisError.value = ''
+  analysisResult.value = null
+
+  try {
+    analysisResult.value = await analyzeMarkdown(
+      markdownSource.value,
+    )
+  } catch (error) {
+    analysisError.value = error.message ||
+      '予期しないエラーが発生しました。'
+  } finally {
+    isAnalyzing.value = false
+  }
+}
 
 const editorElement = ref(null)
 const markdownSource = ref(`# MangaInへようこそ
@@ -52,8 +81,13 @@ onBeforeUnmount(() => editorView?.destroy())
         <span class="document-name">無題のドキュメント</span>
         <span class="format-label"><span class="format-dot"></span>Markdown</span>
       </div>
-      <button class="share-button" type="button" disabled title="AI連携は準備中です">
-        AIに送信
+      <button
+        class="share-button"
+        type="button"
+        :disabled="isAnalyzing"
+        @click="handleAnalyze"
+      >
+        {{ isAnalyzing ? 'AI解析中...' : 'AIに送信' }}
         <span aria-hidden="true">↗</span>
       </button>
     </header>
