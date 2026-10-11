@@ -68,6 +68,14 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => editorView?.destroy())
+
+
+const rawAiResponse = ref('')
+
+// AIのレスポンスを受け取ったときに呼び出す
+function showRawResponse(text) {
+  rawAiResponse.value = text
+}
 </script>
 
 <template>
@@ -132,36 +140,31 @@ onBeforeUnmount(() => editorView?.destroy())
 >
   {{ analysisError }}
 </section>
+<section class="debug-panel">
+    <h2>AI生成結果（デバッグ）</h2>
 
-<section v-if="analysisResult" class="analysis-result">
-  <h2>AI解析結果</h2>
-
-  <h3>要約</h3>
-  <p>{{ analysisResult.summary }}</p>
-
-  <h3>中心技術</h3>
-  <p>{{ analysisResult.mainTechnology }}</p>
-
-  <h3>関連技術</h3>
-  <ul>
-    <li
-      v-for="(technology, index) in analysisResult.relatedTechnologies"
-      :key="`${technology}-${index}`"
-    >
-      {{ technology }}
-    </li>
-  </ul>
-
-  <h3>重要な技術的事実</h3>
-  <ul>
-    <li
-      v-for="(fact, index) in analysisResult.keyFacts"
-      :key="`${fact}-${index}`"
-    >
-      {{ fact }}
-    </li>
-  </ul>
-</section>
+    <pre>{{ rawAiResponse || 'まだ結果がありません' }}</pre>
+  </section>
     <div class="workspace-caption">WRITE WITH CLARITY<span>·</span>SEE IT TAKE SHAPE</div>
   </main>
 </template>
+
+<style scoped>
+.debug-panel {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+}
+
+.debug-panel pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 600px;
+  overflow-y: auto;
+  padding: 12px;
+  background: #f5f5f5;
+  color: #222;
+  border-radius: 4px;
+}
+</style>
