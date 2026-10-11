@@ -77,14 +77,6 @@ export async function analyzeArticle(markdown) {
     },
   })
 
-  // ★ ここに追加：Ollamaから返された内容を確認
-  const rawResponse = response
-console.log('=== Ollama raw response ===')
-console.dir(rawResponse, { depth: null })
-
-console.log('=== Ollama content ===')
-console.log(rawResponse?.message?.content)
-
   let content = ''
 
   for await (const chunk of response) {
