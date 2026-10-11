@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n frontend,backend \"npm:dev:frontend\" \"npm:dev:backend\"",
+    "dev:frontend": "vite",
+    "dev:backend": "npm --prefix backend run dev",
     "build": "vite build",
     "preview": "vite preview",
     "test:unit": "vitest"
@@ -23,6 +25,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.10",
     "@vue/test-utils": "^2.5.0",
+    "concurrently": "^10.0.6",
     "jsdom": "^30.0.1",
     "vite": "^8.3.4",
     "vite-plugin-vue-devtools": "^8.2.1",

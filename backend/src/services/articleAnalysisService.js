@@ -73,12 +73,25 @@ export async function analyzeArticle(markdown) {
     ],
     options: {
       temperature: 0,
+      num_predict: 256,
     },
   })
 
-  const content = response?.message?.content
+  // ★ ここに追加：Ollamaから返された内容を確認
+  const rawResponse = response
+console.log('=== Ollama raw response ===')
+console.dir(rawResponse, { depth: null })
 
-  if (typeof content !== 'string' || !content.trim()) {
+console.log('=== Ollama content ===')
+console.log(rawResponse?.message?.content)
+
+  let content = ''
+
+  for await (const chunk of response) {
+    content += chunk.message?.content ?? ''
+  }
+
+  if (!content.trim()) {
     throw new Error('AI_OUTPUT_UNAVAILABLE')
   }
 
