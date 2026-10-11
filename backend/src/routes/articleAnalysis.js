@@ -1,6 +1,5 @@
 import { Router } from 'express'
 import { z } from 'zod'
-
 import { analyzeArticle } from '../services/articleAnalysisService.js'
 
 const router = Router()
@@ -12,41 +11,38 @@ const RequestSchema = z.object({
 router.post('/analyze', async (req, res) => {
   const parsed = RequestSchema.safeParse(req.body)
 
-  if (!parsed.success) {
+  if (!parsed.success || !parsed.data?.markdown.trim()) {
     return res.status(400).json({
       error: {
-        code: 'INVALID_REQUEST',
-        message: 'Markdown記事を入力してください。',
-      },
-    })
-  }
-
-  if (!parsed.data.markdown.trim()) {
-    return res.status(400).json({
-      error: {
-        code: 'EMPTY_MARKDOWN',
-        message: '解析する記事が空です。',
+        code: 'INVALID_MARKDOWN',
+        message: '解析するMarkdown記事を入力してください。',
       },
     })
   }
 
   try {
-    const result = await analyzeArticle(
-      parsed.data.markdown,
-    )
-
+    const result = await analyzeArticle(parsed.data.markdown)
     return res.status(200).json(result)
   } catch (error) {
     console.error('Article analysis failed:', error)
 
     if (
       error instanceof Error &&
-      error.message === 'AI_OUTPUT_UNAVAILABLE'
+      error.message.startsWith('AI_OUTPUT_')
     ) {
       return res.status(502).json({
         error: {
           code: 'INVALID_AI_OUTPUT',
-          message: 'AIの解析結果を取得できませんでした。',
+          message: 'AIの解析結果を正しく読み取れませんでした。',
+        },
+      })
+    }
+
+    if (error instanceof z.ZodError) {
+      return res.status(502).json({
+        error: {
+          code: 'INVALID_AI_OUTPUT',
+          message: 'AIの解析結果が期待する形式と一致しません。',
         },
       })
     }
@@ -54,7 +50,8 @@ router.post('/analyze', async (req, res) => {
     return res.status(502).json({
       error: {
         code: 'AI_SERVICE_ERROR',
-        message: 'AI解析に失敗しました。時間をおいて再試行してください。',
+        message:
+          'Ollamaへの接続またはAI解析に失敗しました。Ollamaの起動状態とモデル設定を確認してください。',
       },
     })
   }

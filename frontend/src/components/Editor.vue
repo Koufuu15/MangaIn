@@ -125,6 +125,43 @@ onBeforeUnmount(() => editorView?.destroy())
         </footer>
       </section>
     </section>
+    <section
+  v-if="analysisError"
+  class="analysis-error"
+  role="alert"
+>
+  {{ analysisError }}
+</section>
+
+<section v-if="analysisResult" class="analysis-result">
+  <h2>AI解析結果</h2>
+
+  <h3>要約</h3>
+  <p>{{ analysisResult.summary }}</p>
+
+  <h3>中心技術</h3>
+  <p>{{ analysisResult.mainTechnology }}</p>
+
+  <h3>関連技術</h3>
+  <ul>
+    <li
+      v-for="(technology, index) in analysisResult.relatedTechnologies"
+      :key="`${technology}-${index}`"
+    >
+      {{ technology }}
+    </li>
+  </ul>
+
+  <h3>重要な技術的事実</h3>
+  <ul>
+    <li
+      v-for="(fact, index) in analysisResult.keyFacts"
+      :key="`${fact}-${index}`"
+    >
+      {{ fact }}
+    </li>
+  </ul>
+</section>
     <div class="workspace-caption">WRITE WITH CLARITY<span>·</span>SEE IT TAKE SHAPE</div>
   </main>
 </template>
