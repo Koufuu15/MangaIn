@@ -26,7 +26,6 @@ const systemPrompt = `
 
 【出力スキーマ】
 {
-  "summary": "記事の要約",
   "mainTechnology": "中心技術",
   "relatedTechnologies": ["関連技術"],
   "keyFacts": ["重要な技術的事実"]

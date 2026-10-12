@@ -18,3 +18,34 @@ export async function analyzeMarkdown(markdown) {
 
   return data
 }
+
+export async function generateMangaScripts({
+  analysis,
+  panelCountA = 4,
+  panelCountB = 4,
+  storySetting = '',
+}) {
+  const response = await fetch('/api/articles/manga-scripts', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      analysis,
+      panelCountA,
+      panelCountB,
+      storySetting,
+    }),
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ??
+      `マンガ脚本の生成に失敗しました（HTTP ${response.status}）`,
+    )
+  }
+
+  return data
+}

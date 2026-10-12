@@ -4,7 +4,7 @@ import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import { analyzeMarkdown } from '../services/articleAnalysis'
+import { analyzeMarkdown, generateMangaScripts } from '../services/articleAnalysis'
 
 const isAnalyzing = ref(false)
 const analysisResult = ref(null)
@@ -21,14 +21,48 @@ async function handleAnalyze() {
   isAnalyzing.value = true
   analysisError.value = ''
   analysisResult.value = null
+  rawAiResponse.value = ''
 
   try {
-    analysisResult.value = await analyzeMarkdown(
+    // ① 記事解析
+    console.log('[DEBUG] Starting article analysis')
+
+    const analysis = await analyzeMarkdown(
       markdownSource.value,
     )
+
+    analysisResult.value = analysis
+
+    rawAiResponse.value =
+      '=== 記事解析結果 ===\n' +
+      JSON.stringify(analysis, null, 2)
+
+    console.log('[DEBUG] Article analysis completed', analysis)
+
+    // ② マンガ脚本作成
+    console.log('[DEBUG] Starting manga script generation')
+
+    const scripts = await generateMangaScripts({
+      analysis,
+      panelCountA: 4,
+      panelCountB: 4,
+      storySetting: '',
+    })
+
+    console.log('[DEBUG] Manga script generation completed', scripts)
+
+    // ③ 両方の結果をデバッグ画面に表示
+    rawAiResponse.value =
+      '=== 記事解析結果 ===\n' +
+      JSON.stringify(analysis, null, 2) +
+      '\n\n=== マンガ脚本生成結果 ===\n' +
+      JSON.stringify(scripts, null, 2)
+
   } catch (error) {
-    analysisError.value = error.message ||
-      '予期しないエラーが発生しました。'
+    console.error('[DEBUG] AI processing failed:', error)
+
+    analysisError.value =
+      error.message || '予期しないエラーが発生しました。'
   } finally {
     isAnalyzing.value = false
   }
@@ -71,11 +105,6 @@ onBeforeUnmount(() => editorView?.destroy())
 
 
 const rawAiResponse = ref('')
-
-// AIのレスポンスを受け取ったときに呼び出す
-function showRawResponse(text) {
-  rawAiResponse.value = text
-}
 </script>
 
 <template>

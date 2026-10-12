@@ -186,6 +186,43 @@ ${storySetting || '日常生活に起きた小さな謎を、探偵役が技術�
 - 出力は指定JSON Schemaに適合するJSONのみ。Markdownやコードフェンスは禁止。
 - visualDescriptionは、人物の外見、場所、動作、背景、光、画面内の位置を具体的に記述する。
 - sharedArtStyleは両方の漫画に適用できる具体的な画風説明にする。
+
+【出力形式】
+{
+  "characterGuide": {
+    "style": "画風の共通設定",
+    "characters": [
+      {
+        "id": "character-1",
+        "description": "キャラクターの外見"
+      }
+    ]
+  },
+  "comics": [
+    {
+      "id": "summary-comic",
+      "purpose": "記事の要約",
+      "panels": [
+        {
+          "id": "summary-panel-1",
+          "scene": "場面の説明",
+          "visualPrompt": "文字を含まない画像生成用の説明",
+          "dialogues": [
+            {
+              "speakerId": "character-1",
+              "text": "セリフ"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "story-comic",
+      "purpose": "技術を用いたストーリー",
+      "panels": []
+    }
+  ]
+}
 `
 }
 
