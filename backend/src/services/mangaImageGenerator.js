@@ -7,7 +7,6 @@ const workflowPath = fileURLToPath(
   new URL('../../comfyui-mangaImage.json', import.meta.url),
 )
 const workflowTemplate = JSON.parse(await readFile(workflowPath, 'utf8'))
-const COMFYUI_TIMEOUT_MS = 5 * 60 * 1000
 const POLL_INTERVAL_MS = 1000
 
 function articleSource(markdown, analysis) {
@@ -109,7 +108,9 @@ async function submitWorkflow(prompt) {
 }
 
 async function waitForImages(promptId) {
-  const deadline = Date.now() + COMFYUI_TIMEOUT_MS
+  const startedAt = Date.now()
+  const deadline = startedAt + env.comfyUiTimeoutMs
+  let lastStatus = 'ComfyUIから履歴が返されていません'
 
   while (Date.now() < deadline) {
     const response = await fetch(
@@ -118,6 +119,7 @@ async function waitForImages(promptId) {
     )
     const history = await readJsonResponse(response, 'ComfyUI history request')
     const result = history[promptId]
+    lastStatus = result?.status?.status_str ?? lastStatus
 
     if (result?.status?.status_str === 'error') {
       throw new Error(`ComfyUI image generation failed: ${JSON.stringify(result.status)}`)
@@ -137,7 +139,11 @@ async function waitForImages(promptId) {
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
   }
 
-  throw new Error(`ComfyUI prompt ${promptId} timed out.`)
+  const elapsedMinutes = Math.round((Date.now() - startedAt) / 60_000)
+  throw new Error(
+    `ComfyUI prompt ${promptId} produced no image after ${elapsedMinutes} minutes. ` +
+      `Last status: ${lastStatus}. Check the ComfyUI queue and server logs, or increase COMFYUI_TIMEOUT_MS.`,
+  )
 }
 
 async function downloadImage(image) {
@@ -180,10 +186,10 @@ async function generateImage(prompt) {
 }
 
 export async function generateMangaImages({ markdown, analysis }) {
-  const [educationalImage, storyImage] = await Promise.all([
-    generateImage(buildSummaryPrompt(markdown, analysis)),
-    generateImage(buildStoryPrompt(markdown, analysis)),
-  ])
+  const educationalImage = await generateImage(
+    buildSummaryPrompt(markdown, analysis),
+  )
+  const storyImage = await generateImage(buildStoryPrompt(markdown, analysis))
 
   return [
     { title: '技術解説編', dataUrl: educationalImage },
