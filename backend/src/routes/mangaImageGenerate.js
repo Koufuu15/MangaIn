@@ -30,7 +30,7 @@ router.post('/generate', async (req, res) => {
       error: {
         code: 'MANGA_IMAGE_GENERATION_FAILED',
         message:
-          '漫画画像を生成できませんでした。ComfyUIの起動状態とモデル設定を確認してください。',
+          '漫画画像を生成できませんでした。Cloudflare Workers AIのアカウントID・APIトークン・モデル設定を確認してください。',
       },
     })
   }

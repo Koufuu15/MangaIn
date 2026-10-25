@@ -5,9 +5,14 @@ export const env = {
   ollamaHost:
     process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
   ollamaModel: process.env.OLLAMA_MODEL?.trim(),
-  comfyUiHost:
-    process.env.COMFYUI_HOST || 'http://127.0.0.1:8188',
-  comfyUiTimeoutMs: Number(process.env.COMFYUI_TIMEOUT_MS || 15 * 60 * 1000),
+  cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID?.trim(),
+  cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN?.trim(),
+  cloudflareAiModel:
+    process.env.CLOUDFLARE_AI_MODEL?.trim() ||
+    '@cf/black-forest-labs/flux-2-klein-4b',
+  cloudflareAiTimeoutMs: Number(
+    process.env.CLOUDFLARE_AI_TIMEOUT_MS || 5 * 60 * 1000,
+  ),
 }
 
 if (!Number.isInteger(env.port) || env.port < 1 || env.port > 65535) {
@@ -19,11 +24,11 @@ if (!env.ollamaModel) {
 }
 
 if (
-  !Number.isInteger(env.comfyUiTimeoutMs) ||
-  env.comfyUiTimeoutMs < 60_000 ||
-  env.comfyUiTimeoutMs > 60 * 60 * 1000
+  !Number.isInteger(env.cloudflareAiTimeoutMs) ||
+  env.cloudflareAiTimeoutMs < 10_000 ||
+  env.cloudflareAiTimeoutMs > 15 * 60 * 1000
 ) {
   throw new Error(
-    'COMFYUI_TIMEOUT_MSは60000〜3600000の整数で設定してください。',
+    'CLOUDFLARE_AI_TIMEOUT_MSは10000〜900000の整数で設定してください。',
   )
 }
