@@ -4,11 +4,16 @@ import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import { analyzeMarkdown, generateMangaScripts } from '../services/articleAnalysis'
+import {
+  analyzeMarkdown,
+  generateMangaImages,
+} from '../services/articleAnalysis'
 
 const isAnalyzing = ref(false)
 const analysisResult = ref(null)
 const analysisError = ref('')
+const mangaImages = ref([])
+const processingStage = ref('')
 
 async function handleAnalyze() {
   if (isAnalyzing.value) return
@@ -19,8 +24,10 @@ async function handleAnalyze() {
   }
 
   isAnalyzing.value = true
+  processingStage.value = '記事を解析中...'
   analysisError.value = ''
   analysisResult.value = null
+  mangaImages.value = []
   rawAiResponse.value = ''
 
   try {
@@ -39,25 +46,11 @@ async function handleAnalyze() {
 
     console.log('[DEBUG] Article analysis completed', analysis)
 
-    // ② マンガ脚本作成
-    console.log('[DEBUG] Starting manga script generation')
-
-    const scripts = await generateMangaScripts({
+    processingStage.value = '漫画画像を生成中...'
+    mangaImages.value = await generateMangaImages({
       markdown: markdownSource.value,
       analysis,
-      panelCountA: 4,
-      panelCountB: 4,
-      storySetting: '',
     })
-
-    console.log('[DEBUG] Manga script generation completed', scripts)
-
-    // ③ 両方の結果をデバッグ画面に表示
-    rawAiResponse.value =
-      '=== 記事解析結果 ===\n' +
-      JSON.stringify(analysis, null, 2) +
-      '\n\n=== マンガ脚本生成結果 ===\n' +
-      JSON.stringify(scripts, null, 2)
 
   } catch (error) {
     console.error('[DEBUG] AI processing failed:', error)
@@ -66,6 +59,7 @@ async function handleAnalyze() {
       error.message || '予期しないエラーが発生しました。'
   } finally {
     isAnalyzing.value = false
+    processingStage.value = ''
   }
 }
 
@@ -125,7 +119,7 @@ const rawAiResponse = ref('')
         :disabled="isAnalyzing"
         @click="handleAnalyze"
       >
-        {{ isAnalyzing ? 'AI解析中...' : 'AIに送信' }}
+        {{ isAnalyzing ? processingStage : 'AIに送信' }}
         <span aria-hidden="true">↗</span>
       </button>
     </header>
@@ -155,6 +149,20 @@ const rawAiResponse = ref('')
           <span class="preview-state"><span class="preview-dot"></span>Live</span>
         </div>
         <div class="preview-scroll">
+          <section
+            v-if="mangaImages.length"
+            class="manga-images"
+            aria-label="生成された漫画画像"
+          >
+            <details
+              v-for="(image, index) in mangaImages"
+              :key="image.title"
+              class="manga-image"
+            >
+              <summary>漫画画像 {{ index + 1 }}：{{ image.title }}</summary>
+              <img :src="image.dataUrl" :alt="`${image.title}の漫画画像`">
+            </details>
+          </section>
           <article class="markdown-body" v-html="previewHtml"></article>
         </div>
         <footer class="pane-footer">
@@ -185,6 +193,34 @@ const rawAiResponse = ref('')
   padding: 16px;
   border: 1px solid #ccc;
   border-radius: 8px;
+}
+
+.manga-images {
+  display: grid;
+  gap: 12px;
+  max-width: 680px;
+  margin: 0 auto 28px;
+}
+
+.manga-image {
+  overflow: hidden;
+  border: 1px solid #e1e6e1;
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+
+.manga-image summary {
+  padding: 12px 14px;
+  color: #354039;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.manga-image img {
+  display: block;
+  width: 100%;
+  border-top: 1px solid #e1e6e1;
 }
 
 .debug-panel pre {

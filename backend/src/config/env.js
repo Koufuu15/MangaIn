@@ -5,6 +5,8 @@ export const env = {
   ollamaHost:
     process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
   ollamaModel: process.env.OLLAMA_MODEL?.trim(),
+  comfyUiHost:
+    process.env.COMFYUI_HOST || 'http://127.0.0.1:8188',
 }
 
 if (!Number.isInteger(env.port) || env.port < 1 || env.port > 65535) {

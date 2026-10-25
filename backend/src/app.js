@@ -1,5 +1,6 @@
 import express from 'express'
 import articleAnalysisRouter from './routes/articleAnalysis.js'
+import mangaImageGenerateRouter from './routes/mangaImageGenerate.js'
 
 const app = express()
 
@@ -10,5 +11,6 @@ app.get('/api/health', (req, res) => {
 })
 
 app.use('/api/articles', articleAnalysisRouter)
+app.use('/api/articles/manga-images', mangaImageGenerateRouter)
 
 export default app
