@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import {
   analyzeMarkdown,
+  explainWord,
   generateMangaImages,
 } from '../services/articleAnalysis'
 
@@ -14,6 +15,158 @@ const analysisResult = ref(null)
 const analysisError = ref('')
 const mangaImages = ref([])
 const processingStage = ref('')
+const previewScrollElement = ref(null)
+const previewArticleElement = ref(null)
+const wordPopover = ref(null)
+const unknownWords = ref([])
+const dictionaryError = ref('')
+let explanationRequestId = 0
+let explanationController
+const unknownWordsStorageKey = 'mangain.unknownWords'
+
+function loadUnknownWords() {
+  try {
+    const savedWords = JSON.parse(
+      window.localStorage.getItem(unknownWordsStorageKey) ?? '[]',
+    )
+    unknownWords.value = Array.isArray(savedWords)
+      ? savedWords.filter(
+          (entry) =>
+            typeof entry?.word === 'string' &&
+            typeof entry?.meaning === 'string',
+        )
+      : []
+  } catch (error) {
+    console.error('Failed to load My dictionary:', error)
+    dictionaryError.value = 'My辞書を読み込めませんでした。'
+  }
+}
+
+function hideWordPopover() {
+  explanationRequestId += 1
+  explanationController?.abort()
+  explanationController = undefined
+  wordPopover.value = null
+}
+
+function selectedPreviewWord() {
+  const selection = window.getSelection()
+  const selectedText = selection?.toString().trim()
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null
+
+  if (
+    !selectedText ||
+    selectedText.length > 100 ||
+    /\s/.test(selectedText) ||
+    !range ||
+    !previewArticleElement.value?.contains(range.commonAncestorContainer)
+  ) {
+    return null
+  }
+
+  return { word: selectedText, rect: range.getBoundingClientRect() }
+}
+
+async function handlePreviewMouseUp() {
+  const selected = selectedPreviewWord()
+  if (!selected) {
+    hideWordPopover()
+    return
+  }
+
+  if (
+    wordPopover.value?.word === selected.word &&
+    (wordPopover.value.loading || wordPopover.value.meaning)
+  ) {
+    return
+  }
+
+  hideWordPopover()
+  const requestId = explanationRequestId
+  const controller = new AbortController()
+  explanationController = controller
+  const scrollElement = previewScrollElement.value
+  const scrollRect = scrollElement.getBoundingClientRect()
+  const popoverWidth = Math.max(0, Math.min(300, scrollElement.clientWidth - 24))
+  const left = Math.max(
+    12,
+    Math.min(
+      selected.rect.left - scrollRect.left + scrollElement.scrollLeft,
+      scrollElement.scrollLeft + scrollElement.clientWidth - popoverWidth - 12,
+    ),
+  )
+
+  wordPopover.value = {
+    word: selected.word,
+    meaning: '',
+    loading: true,
+    error: '',
+    top: selected.rect.bottom - scrollRect.top + scrollElement.scrollTop + 8,
+    left,
+    width: popoverWidth,
+  }
+
+  try {
+    const meaning = await explainWord(selected.word, {
+      signal: controller.signal,
+    })
+    if (requestId !== explanationRequestId) return
+    wordPopover.value = { ...wordPopover.value, meaning, loading: false }
+  } catch (error) {
+    if (controller.signal.aborted || requestId !== explanationRequestId) return
+    wordPopover.value = {
+      ...wordPopover.value,
+      loading: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : '単語の解説に失敗しました。',
+    }
+  }
+}
+
+function handleSelectionChange() {
+  if (!selectedPreviewWord()) hideWordPopover()
+}
+
+function handleDocumentPointerDown(event) {
+  if (
+    !previewScrollElement.value?.contains(event.target) ||
+    !(event.target instanceof Element) ||
+    !event.target.closest('.word-popover')
+  ) {
+    hideWordPopover()
+  }
+}
+
+function addWordToDictionary() {
+  if (!wordPopover.value?.meaning || wordPopover.value.error) return
+
+  const alreadySaved = unknownWords.value.some(
+    (entry) => entry.word === wordPopover.value.word,
+  )
+  if (alreadySaved) return
+
+  const updatedWords = [
+    {
+      word: wordPopover.value.word,
+      meaning: wordPopover.value.meaning,
+    },
+    ...unknownWords.value,
+  ]
+
+  try {
+    window.localStorage.setItem(
+      unknownWordsStorageKey,
+      JSON.stringify(updatedWords),
+    )
+    unknownWords.value = updatedWords
+    dictionaryError.value = ''
+  } catch (error) {
+    console.error('Failed to save My dictionary:', error)
+    dictionaryError.value = 'My辞書に保存できませんでした。'
+  }
+}
 
 async function handleAnalyze() {
   if (isAnalyzing.value) return
@@ -82,6 +235,9 @@ const lineCount = computed(() => markdownSource.value.split('\n').length)
 const characterCount = computed(() => markdownSource.value.length)
 
 onMounted(() => {
+  loadUnknownWords()
+  document.addEventListener('selectionchange', handleSelectionChange)
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
   editorView = new EditorView({
     doc: markdownSource.value,
     extensions: [
@@ -96,7 +252,12 @@ onMounted(() => {
   })
 })
 
-onBeforeUnmount(() => editorView?.destroy())
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', handleSelectionChange)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  hideWordPopover()
+  editorView?.destroy()
+})
 
 
 const rawAiResponse = ref('')
@@ -148,7 +309,11 @@ const rawAiResponse = ref('')
           </div>
           <span class="preview-state"><span class="preview-dot"></span>Live</span>
         </div>
-        <div class="preview-scroll">
+        <div
+          ref="previewScrollElement"
+          class="preview-scroll"
+          @mouseup="handlePreviewMouseUp"
+        >
           <section
             v-if="mangaImages.length"
             class="manga-images"
@@ -163,13 +328,74 @@ const rawAiResponse = ref('')
               <img :src="image.dataUrl" :alt="`${image.title}の漫画画像`">
             </details>
           </section>
-          <article class="markdown-body" v-html="previewHtml"></article>
+          <article
+            ref="previewArticleElement"
+            class="markdown-body"
+            v-html="previewHtml"
+          ></article>
+          <aside
+            v-if="wordPopover"
+            class="word-popover"
+            :style="{
+              top: `${wordPopover.top}px`,
+              left: `${wordPopover.left}px`,
+              width: `${wordPopover.width}px`,
+            }"
+            aria-live="polite"
+          >
+            <strong class="word-popover-title">{{ wordPopover.word }}</strong>
+            <p v-if="wordPopover.loading" class="word-popover-message">
+              AIが解説を作成中...
+            </p>
+            <p v-else-if="wordPopover.error" class="word-popover-message word-popover-error">
+              {{ wordPopover.error }}
+            </p>
+            <p v-else class="word-popover-message">{{ wordPopover.meaning }}</p>
+            <button
+              type="button"
+              class="dictionary-add-button"
+              :disabled="
+                wordPopover.loading ||
+                !!wordPopover.error ||
+                unknownWords.some((entry) => entry.word === wordPopover.word)
+              "
+              @mousedown.prevent
+              @click="addWordToDictionary"
+            >
+              {{
+                unknownWords.some((entry) => entry.word === wordPopover.word)
+                  ? 'My辞書に追加済み'
+                  : 'My辞書に追加'
+              }}
+            </button>
+          </aside>
         </div>
         <footer class="pane-footer">
           <span>プレビュー</span>
           <span>HTML</span>
         </footer>
       </section>
+    </section>
+    <section class="dictionary-section" aria-labelledby="dictionary-title">
+      <div class="dictionary-heading">
+        <div>
+          <span class="pane-kicker">MY WORDS</span>
+          <h2 id="dictionary-title">分からない単語</h2>
+        </div>
+        <span class="dictionary-count">{{ unknownWords.length }} 語</span>
+      </div>
+      <p v-if="dictionaryError" class="dictionary-error" role="alert">
+        {{ dictionaryError }}
+      </p>
+      <p v-else-if="!unknownWords.length" class="dictionary-empty">
+        プレビューで単語を選択し、My辞書に追加できます。
+      </p>
+      <ul v-else class="dictionary-list">
+        <li v-for="entry in unknownWords" :key="entry.word">
+          <strong>{{ entry.word }}</strong>
+          <span>{{ entry.meaning }}</span>
+        </li>
+      </ul>
     </section>
     <section
   v-if="analysisError"
@@ -188,6 +414,120 @@ const rawAiResponse = ref('')
 </template>
 
 <style scoped>
+.preview-scroll {
+  position: relative;
+}
+
+.word-popover {
+  position: absolute;
+  z-index: 2;
+  padding: 13px;
+  border: 1px solid #d9e5dc;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(32, 51, 40, 0.16);
+}
+
+.word-popover::before {
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid #d9e5dc;
+  border-left: 1px solid #d9e5dc;
+  background: #fff;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.word-popover-title {
+  display: block;
+  color: #263b2e;
+  font-size: 13px;
+}
+
+.word-popover-message {
+  margin: 7px 0 11px;
+  color: #4c5750;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.word-popover-error,
+.dictionary-error {
+  color: #a33a32;
+}
+
+.dictionary-add-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cbdacf;
+  border-radius: 5px;
+  background: #f3f8f4;
+  color: #286b52;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dictionary-add-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.dictionary-section {
+  margin-top: 20px;
+  padding: 20px 22px;
+  border: 1px solid #e1e6e1;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 32px rgba(32, 51, 40, 0.045);
+}
+
+.dictionary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dictionary-heading h2 {
+  margin: 3px 0 0;
+  color: #202724;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dictionary-count,
+.dictionary-empty {
+  color: #7b8580;
+  font-size: 12px;
+}
+
+.dictionary-list {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dictionary-list li {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.3fr) minmax(0, 1fr);
+  gap: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #edf0ed;
+  color: #4c5750;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dictionary-list strong {
+  color: #263b2e;
+}
+
 .debug-panel {
   margin-top: 24px;
   padding: 16px;
