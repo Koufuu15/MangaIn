@@ -8,7 +8,13 @@ import {
   analyzeMarkdown,
   explainWord,
   generateMangaImages,
+  generateWordMangaImage,
 } from '../services/articleAnalysis'
+import {
+  deleteWordMangaImage,
+  loadWordMangaImages,
+  saveWordMangaImage,
+} from '../services/wordMangaStorage'
 
 const isAnalyzing = ref(false)
 const analysisResult = ref(null)
@@ -20,25 +26,71 @@ const previewArticleElement = ref(null)
 const wordPopover = ref(null)
 const unknownWords = ref([])
 const dictionaryError = ref('')
+const dictionaryMangaImages = ref({})
+const unsavedMangaImages = ref({})
+const mangaModal = ref(null)
+const mangaGenerationErrors = ref({})
+const generatingWordIds = ref([])
+const editingWordId = ref(null)
+const editDraft = ref({ word: '', meaning: '' })
 let explanationRequestId = 0
 let explanationController
+let mangaGenerationRequestId = 0
+const activeMangaGenerationRequests = new Map()
 const unknownWordsStorageKey = 'mangain.unknownWords'
 
-function loadUnknownWords() {
+function createWordId() {
+  return window.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function persistUnknownWords(words) {
+  try {
+    window.localStorage.setItem(unknownWordsStorageKey, JSON.stringify(words))
+    unknownWords.value = words
+    dictionaryError.value = ''
+    return true
+  } catch (error) {
+    console.error('Failed to save My dictionary:', error)
+    dictionaryError.value = 'My辞書に保存できませんでした。'
+    return false
+  }
+}
+
+async function loadUnknownWords() {
   try {
     const savedWords = JSON.parse(
       window.localStorage.getItem(unknownWordsStorageKey) ?? '[]',
     )
-    unknownWords.value = Array.isArray(savedWords)
+    const words = Array.isArray(savedWords)
       ? savedWords.filter(
           (entry) =>
             typeof entry?.word === 'string' &&
             typeof entry?.meaning === 'string',
-        )
+        ).map((entry) => ({
+          ...entry,
+          id: typeof entry.id === 'string' ? entry.id : createWordId(),
+        }))
       : []
+    unknownWords.value = words
+
+    if (
+      !Array.isArray(savedWords) ||
+      savedWords.length !== words.length ||
+      words.some((entry, index) => entry.id !== savedWords[index]?.id)
+    ) {
+      persistUnknownWords(words)
+    }
+
+    dictionaryMangaImages.value = await loadWordMangaImages(
+      words.map((entry) => entry.id),
+    )
   } catch (error) {
     console.error('Failed to load My dictionary:', error)
-    dictionaryError.value = 'My辞書を読み込めませんでした。'
+    dictionaryError.value =
+      error instanceof Error
+        ? `My辞書または保存済み画像を読み込めませんでした: ${error.message}`
+        : 'My辞書または保存済み画像を読み込めませんでした。'
   }
 }
 
@@ -149,22 +201,211 @@ function addWordToDictionary() {
 
   const updatedWords = [
     {
+      id: createWordId(),
       word: wordPopover.value.word,
       meaning: wordPopover.value.meaning,
     },
     ...unknownWords.value,
   ]
 
+  persistUnknownWords(updatedWords)
+}
+
+function startEditingWord(entry) {
+  editingWordId.value = entry.id
+  editDraft.value = { word: entry.word, meaning: entry.meaning }
+  activeMangaGenerationRequests.delete(entry.id)
+  generatingWordIds.value = generatingWordIds.value.filter(
+    (id) => id !== entry.id,
+  )
+}
+
+function cancelEditingWord() {
+  editingWordId.value = null
+  editDraft.value = { word: '', meaning: '' }
+}
+
+function showWordManga(entry) {
+  const image =
+    unsavedMangaImages.value[entry.id] ||
+    dictionaryMangaImages.value[entry.id]
+  if (!image) return
+
+  mangaModal.value = { id: entry.id, word: entry.word, image }
+}
+
+function closeMangaModal() {
+  mangaModal.value = null
+}
+
+function handleMangaModalKeydown(event) {
+  if (event.key === 'Escape') closeMangaModal()
+}
+
+async function deleteWordManga(entry) {
   try {
-    window.localStorage.setItem(
-      unknownWordsStorageKey,
-      JSON.stringify(updatedWords),
+    await deleteWordMangaImage(entry.id)
+    const savedImages = { ...dictionaryMangaImages.value }
+    delete savedImages[entry.id]
+    dictionaryMangaImages.value = savedImages
+    const generatedImages = { ...unsavedMangaImages.value }
+    delete generatedImages[entry.id]
+    unsavedMangaImages.value = generatedImages
+    if (mangaModal.value?.id === entry.id) closeMangaModal()
+    const errors = { ...mangaGenerationErrors.value }
+    delete errors[entry.id]
+    mangaGenerationErrors.value = errors
+  } catch (error) {
+    console.error('Failed to delete word manga image:', error)
+    mangaGenerationErrors.value = {
+      ...mangaGenerationErrors.value,
+      [entry.id]:
+        error instanceof Error
+          ? `画像を削除できませんでした: ${error.message}`
+          : '画像を削除できませんでした。',
+    }
+  }
+}
+
+async function saveWordEdit(entry) {
+  const word = editDraft.value.word.trim()
+  const meaning = editDraft.value.meaning.trim()
+  if (!word || !meaning) return
+
+  const updatedWords = unknownWords.value.map((current) =>
+    current.id === entry.id ? { ...current, word, meaning } : current,
+  )
+  if (!persistUnknownWords(updatedWords)) return
+  cancelEditingWord()
+  const generationErrors = { ...mangaGenerationErrors.value }
+  delete generationErrors[entry.id]
+  mangaGenerationErrors.value = generationErrors
+
+  if (word !== entry.word || meaning !== entry.meaning) {
+    const savedImages = { ...dictionaryMangaImages.value }
+    delete savedImages[entry.id]
+    dictionaryMangaImages.value = savedImages
+    const updatedUnsavedImages = { ...unsavedMangaImages.value }
+    delete updatedUnsavedImages[entry.id]
+    unsavedMangaImages.value = updatedUnsavedImages
+
+    try {
+      await deleteWordMangaImage(entry.id)
+    } catch (error) {
+      console.error('Failed to remove outdated word manga:', error)
+      dictionaryError.value =
+        '単語と意味は更新しましたが、古い解説画像を削除できませんでした。'
+    }
+  }
+}
+
+async function deleteWord(entry) {
+  if (!persistUnknownWords(
+    unknownWords.value.filter((current) => current.id !== entry.id),
+  )) {
+    return
+  }
+
+  if (editingWordId.value === entry.id) cancelEditingWord()
+  activeMangaGenerationRequests.delete(entry.id)
+  generatingWordIds.value = generatingWordIds.value.filter(
+    (id) => id !== entry.id,
+  )
+  try {
+    await deleteWordMangaImage(entry.id)
+  } catch (error) {
+    console.error('Failed to delete word manga:', error)
+    dictionaryError.value =
+      '単語は削除しましたが、保存済み画像を削除できませんでした。'
+  }
+
+  const savedImages = { ...dictionaryMangaImages.value }
+  delete savedImages[entry.id]
+  dictionaryMangaImages.value = savedImages
+  const generatedImages = { ...unsavedMangaImages.value }
+  delete generatedImages[entry.id]
+  unsavedMangaImages.value = generatedImages
+  const generationErrors = { ...mangaGenerationErrors.value }
+  delete generationErrors[entry.id]
+  mangaGenerationErrors.value = generationErrors
+}
+
+async function generateWordManga(entry) {
+  if (activeMangaGenerationRequests.has(entry.id)) return
+
+  const requestId = ++mangaGenerationRequestId
+  activeMangaGenerationRequests.set(entry.id, requestId)
+  generatingWordIds.value = [...generatingWordIds.value, entry.id]
+  mangaGenerationErrors.value = {
+    ...mangaGenerationErrors.value,
+    [entry.id]: '',
+  }
+
+  try {
+    const image = await generateWordMangaImage({
+      word: entry.word,
+      meaning: entry.meaning,
+    })
+    const currentEntry = unknownWords.value.find(
+      (current) => current.id === entry.id,
     )
-    unknownWords.value = updatedWords
+    if (
+      activeMangaGenerationRequests.get(entry.id) !== requestId ||
+      currentEntry?.word !== entry.word ||
+      currentEntry?.meaning !== entry.meaning
+    ) {
+      return
+    }
+    unsavedMangaImages.value = {
+      ...unsavedMangaImages.value,
+      [entry.id]: image,
+    }
+  } catch (error) {
+    if (activeMangaGenerationRequests.get(entry.id) !== requestId) return
+    console.error('Failed to generate word manga:', error)
+    mangaGenerationErrors.value = {
+      ...mangaGenerationErrors.value,
+      [entry.id]:
+        error instanceof Error
+          ? error.message
+          : '解説漫画を生成できませんでした。',
+    }
+  } finally {
+    if (activeMangaGenerationRequests.get(entry.id) === requestId) {
+      activeMangaGenerationRequests.delete(entry.id)
+      generatingWordIds.value = generatingWordIds.value.filter(
+        (id) => id !== entry.id,
+      )
+    }
+  }
+}
+
+async function saveGeneratedManga(entry) {
+  const image = unsavedMangaImages.value[entry.id]
+  if (!image) return
+
+  try {
+    await saveWordMangaImage(entry.id, image)
+    dictionaryMangaImages.value = {
+      ...dictionaryMangaImages.value,
+      [entry.id]: image,
+    }
+    const generationErrors = { ...mangaGenerationErrors.value }
+    delete generationErrors[entry.id]
+    mangaGenerationErrors.value = generationErrors
+    const generatedImages = { ...unsavedMangaImages.value }
+    delete generatedImages[entry.id]
+    unsavedMangaImages.value = generatedImages
     dictionaryError.value = ''
   } catch (error) {
-    console.error('Failed to save My dictionary:', error)
-    dictionaryError.value = 'My辞書に保存できませんでした。'
+    console.error('Failed to save word manga:', error)
+    mangaGenerationErrors.value = {
+      ...mangaGenerationErrors.value,
+      [entry.id]:
+        error instanceof Error
+          ? error.message
+          : '解説漫画を保存できませんでした。',
+    }
   }
 }
 
@@ -238,6 +479,7 @@ onMounted(() => {
   loadUnknownWords()
   document.addEventListener('selectionchange', handleSelectionChange)
   document.addEventListener('pointerdown', handleDocumentPointerDown)
+  document.addEventListener('keydown', handleMangaModalKeydown)
   editorView = new EditorView({
     doc: markdownSource.value,
     extensions: [
@@ -255,6 +497,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', handleSelectionChange)
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  document.removeEventListener('keydown', handleMangaModalKeydown)
   hideWordPopover()
   editorView?.destroy()
 })
@@ -391,12 +634,147 @@ const rawAiResponse = ref('')
         プレビューで単語を選択し、My辞書に追加できます。
       </p>
       <ul v-else class="dictionary-list">
-        <li v-for="entry in unknownWords" :key="entry.word">
-          <strong>{{ entry.word }}</strong>
-          <span>{{ entry.meaning }}</span>
+        <li v-for="entry in unknownWords" :key="entry.id">
+          <form
+            v-if="editingWordId === entry.id"
+            class="dictionary-edit-form"
+            @submit.prevent="saveWordEdit(entry)"
+          >
+            <label>
+              単語
+              <input
+                v-model="editDraft.word"
+                type="text"
+                maxlength="100"
+                required
+              >
+            </label>
+            <label>
+              意味
+              <textarea
+                v-model="editDraft.meaning"
+                rows="3"
+                maxlength="2000"
+                required
+              ></textarea>
+            </label>
+            <div class="dictionary-actions">
+              <button class="dictionary-action-button" type="submit">保存</button>
+              <button
+                class="dictionary-action-button"
+                type="button"
+                @click="cancelEditingWord"
+              >
+                キャンセル
+              </button>
+            </div>
+          </form>
+          <template v-else>
+            <div class="dictionary-entry-content">
+              <div class="dictionary-entry-text">
+                <strong>{{ entry.word }}</strong>
+                <span>{{ entry.meaning }}</span>
+              </div>
+              <div class="dictionary-actions">
+                <button
+                  class="dictionary-action-button"
+                  type="button"
+                  @click="startEditingWord(entry)"
+                >
+                  編集
+                </button>
+                <button
+                  class="dictionary-action-button dictionary-delete-button"
+                  type="button"
+                  @click="deleteWord(entry)"
+                >
+                  削除
+                </button>
+                <button
+                  class="dictionary-action-button dictionary-manga-button"
+                  type="button"
+                  :disabled="generatingWordIds.includes(entry.id)"
+                  @click="generateWordManga(entry)"
+                >
+                  {{
+                    generatingWordIds.includes(entry.id)
+                      ? '漫画を生成中...'
+                      : '単語の意味を漫画で解説'
+                  }}
+                </button>
+              </div>
+            </div>
+            <p
+              v-if="mangaGenerationErrors[entry.id]"
+              class="dictionary-error"
+              role="alert"
+            >
+              {{ mangaGenerationErrors[entry.id] }}
+            </p>
+            <div
+              v-if="
+                unsavedMangaImages[entry.id] ||
+                dictionaryMangaImages[entry.id]
+              "
+              class="dictionary-manga-actions"
+            >
+              <button
+                class="dictionary-manga-link"
+                type="button"
+                @click="showWordManga(entry)"
+              >
+                漫画を表示
+              </button>
+              <button
+                class="dictionary-action-button dictionary-delete-button"
+                type="button"
+                @click="deleteWordManga(entry)"
+              >
+                漫画を削除
+              </button>
+            </div>
+            <button
+              v-if="unsavedMangaImages[entry.id]"
+              class="dictionary-action-button dictionary-manga-button"
+              type="button"
+              @click="saveGeneratedManga(entry)"
+            >
+              解説漫画をMy辞書に保存
+            </button>
+          </template>
         </li>
       </ul>
     </section>
+    <div
+      v-if="mangaModal"
+      class="manga-modal-backdrop"
+      role="presentation"
+      @click.self="closeMangaModal"
+    >
+      <section
+        class="manga-modal"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="`${mangaModal.word}の解説漫画`"
+      >
+        <header class="manga-modal-header">
+          <h2>{{ mangaModal.word }}の解説漫画</h2>
+          <button
+            class="manga-modal-close"
+            type="button"
+            aria-label="漫画を閉じる"
+            @click="closeMangaModal"
+          >
+            ×
+          </button>
+        </header>
+        <img
+          class="manga-modal-image"
+          :src="mangaModal.image"
+          :alt="`${mangaModal.word}の意味を解説する漫画`"
+        >
+      </section>
+    </div>
     <section
   v-if="analysisError"
   class="analysis-error"
@@ -514,9 +892,9 @@ const rawAiResponse = ref('')
 }
 
 .dictionary-list li {
-  display: grid;
-  grid-template-columns: minmax(100px, 0.3fr) minmax(0, 1fr);
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding-top: 10px;
   border-top: 1px solid #edf0ed;
   color: #4c5750;
@@ -524,8 +902,163 @@ const rawAiResponse = ref('')
   line-height: 1.6;
 }
 
+.dictionary-entry-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.dictionary-entry-text {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.3fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
 .dictionary-list strong {
   color: #263b2e;
+}
+
+.dictionary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dictionary-action-button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #d8dfd9;
+  border-radius: 5px;
+  background: #fff;
+  color: #4c5750;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.dictionary-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.dictionary-delete-button {
+  color: #a33a32;
+}
+
+.dictionary-manga-button {
+  border-color: #cbdacf;
+  background: #f3f8f4;
+  color: #286b52;
+  font-weight: 600;
+}
+
+.dictionary-edit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.dictionary-edit-form label {
+  display: grid;
+  gap: 5px;
+  color: #59635e;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dictionary-edit-form input,
+.dictionary-edit-form textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d8dfd9;
+  border-radius: 5px;
+  color: #354039;
+  font: inherit;
+  font-weight: 400;
+}
+
+.dictionary-edit-form textarea {
+  resize: vertical;
+}
+
+.dictionary-manga-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dictionary-manga-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #286b52;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.manga-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  place-items: center;
+  padding: 24px;
+  background: rgba(20, 29, 24, 0.72);
+}
+
+.manga-modal {
+  width: min(100%, 900px);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  border: 1px solid #e1e6e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.manga-modal-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #edf0ed;
+  background: #fff;
+}
+
+.manga-modal-header h2 {
+  margin: 0;
+  color: #263b2e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.manga-modal-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #d8dfd9;
+  border-radius: 50%;
+  background: #fff;
+  color: #4c5750;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.manga-modal-image {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .debug-panel {
@@ -572,5 +1105,24 @@ const rawAiResponse = ref('')
   background: #f5f5f5;
   color: #222;
   border-radius: 4px;
+}
+
+@media (max-width: 760px) {
+  .manga-modal-backdrop {
+    padding: 12px;
+  }
+
+  .manga-modal {
+    max-height: calc(100vh - 24px);
+  }
+
+  .dictionary-entry-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dictionary-entry-text {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
 }
 </style>

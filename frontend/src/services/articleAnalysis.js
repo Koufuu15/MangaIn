@@ -62,6 +62,27 @@ export async function generateMangaImages({ markdown, analysis }) {
   return data.images
 }
 
+export async function generateWordMangaImage({ word, meaning }) {
+  const response = await fetch('/api/articles/manga-images/generate-word', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ word, meaning }),
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ??
+      `解説漫画の生成に失敗しました（HTTP ${response.status}）`,
+    )
+  }
+
+  return data.image
+}
+
 export async function generateMangaScripts({
   markdown,
   analysis,
