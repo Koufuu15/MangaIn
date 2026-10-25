@@ -7,6 +7,7 @@ import { marked } from 'marked'
 import {
   analyzeMarkdown,
   explainWord,
+  generateArticleExplanation,
   generateMangaImages,
   generateWordMangaImage,
 } from '../services/articleAnalysis'
@@ -19,6 +20,9 @@ import {
 const isAnalyzing = ref(false)
 const analysisResult = ref(null)
 const analysisError = ref('')
+const articleExplanation = ref('')
+const articleExplanationError = ref('')
+const isGeneratingArticleExplanation = ref(false)
 const mangaImages = ref([])
 const processingStage = ref('')
 const previewScrollElement = ref(null)
@@ -423,6 +427,8 @@ async function handleAnalyze() {
   analysisResult.value = null
   mangaImages.value = []
   rawAiResponse.value = ''
+  articleExplanation.value = ''
+  articleExplanationError.value = ''
 
   try {
     // ① 記事解析
@@ -440,6 +446,22 @@ async function handleAnalyze() {
 
     console.log('[DEBUG] Article analysis completed', analysis)
 
+    isGeneratingArticleExplanation.value = true
+    processingStage.value = '記事の補足を生成中...'
+    try {
+      articleExplanation.value = await generateArticleExplanation(
+        markdownSource.value,
+      )
+    } catch (error) {
+      console.error('Failed to generate article explanation:', error)
+      articleExplanationError.value =
+        error instanceof Error
+          ? error.message
+          : '記事の補足解説を生成できませんでした。'
+    } finally {
+      isGeneratingArticleExplanation.value = false
+    }
+
     processingStage.value = '漫画画像を生成中...'
     mangaImages.value = await generateMangaImages({
       markdown: markdownSource.value,
@@ -453,6 +475,7 @@ async function handleAnalyze() {
       error.message || '予期しないエラーが発生しました。'
   } finally {
     isAnalyzing.value = false
+    isGeneratingArticleExplanation.value = false
     processingStage.value = ''
   }
 }
@@ -571,6 +594,23 @@ const rawAiResponse = ref('')
               <img :src="image.dataUrl" :alt="`${image.title}の漫画画像`">
             </details>
           </section>
+          <details
+            v-if="
+              isGeneratingArticleExplanation ||
+              articleExplanation ||
+              articleExplanationError
+            "
+            class="article-explanation"
+          >
+            <summary>記事内の専門用語</summary>
+            <p v-if="isGeneratingArticleExplanation" aria-live="polite">
+              AIが専門用語を解説中...
+            </p>
+            <p v-else-if="articleExplanationError" role="alert">
+              {{ articleExplanationError }}
+            </p>
+            <p v-else>{{ articleExplanation }}</p>
+          </details>
           <article
             ref="previewArticleElement"
             class="markdown-body"
@@ -794,6 +834,34 @@ const rawAiResponse = ref('')
 <style scoped>
 .preview-scroll {
   position: relative;
+}
+
+.article-explanation {
+  max-width: 680px;
+  margin: 0 auto 24px;
+  padding: 12px 14px;
+  border: 1px solid #dfe9e1;
+  border-radius: 6px;
+  background: #f7faf7;
+  color: #4c5750;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.article-explanation summary {
+  color: #286b52;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.article-explanation p {
+  margin: 9px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.article-explanation [role='alert'] {
+  color: #a33a32;
 }
 
 .word-popover {

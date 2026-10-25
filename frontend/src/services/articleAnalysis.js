@@ -19,6 +19,27 @@ export async function analyzeMarkdown(markdown) {
   return data
 }
 
+export async function generateArticleExplanation(markdown) {
+  const response = await fetch('/api/articles/explanation', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ markdown }),
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message ??
+      `補足解説の生成に失敗しました（HTTP ${response.status}）`,
+    )
+  }
+
+  return data.explanation
+}
+
 export async function explainWord(word, { signal } = {}) {
   const response = await fetch('/api/words/explain', {
     method: 'POST',
