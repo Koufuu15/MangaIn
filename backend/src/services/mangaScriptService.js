@@ -166,11 +166,13 @@ JSONが途中で切れている場合や、JSON以外の文章が含まれてい
 ${analysisText}
 
 【漫画A：記事の要約漫画】
+- 入力データ：解析結果の中のkeyFacts、記事の原文
 - コマ数は正確に${countA}コマ。
 - 課題、技術の仕組み、解決または効果の流れを基本にする。
 - 記事に書かれていない仕様や数値を事実として作らない。
 
 【漫画B：技術を使ったストーリー漫画】
+- 入力データ：解析結果の中のmainTechnology、relatedTechnologies
 - コマ数は正確に${countB}コマ。
 - 問題発生、技術を使った解決、結果の流れにする。
 - ストーリー設定は架空でよいが、技術の仕組みや効果を誤って描写しない。
@@ -227,6 +229,7 @@ ${storySetting || '日常生活に起きた小さな謎を、探偵役が技術�
 }
 
 export async function generateMangaScripts({
+  markdown,
   analysis: rawAnalysis,
   panelCountA = 4,
   panelCountB = 4,

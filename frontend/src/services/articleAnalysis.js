@@ -20,6 +20,7 @@ export async function analyzeMarkdown(markdown) {
 }
 
 export async function generateMangaScripts({
+  markdown,
   analysis,
   panelCountA = 4,
   panelCountB = 4,
@@ -31,6 +32,7 @@ export async function generateMangaScripts({
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
+      markdown,
       analysis,
       panelCountA,
       panelCountB,

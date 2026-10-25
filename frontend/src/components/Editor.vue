@@ -43,6 +43,7 @@ async function handleAnalyze() {
     console.log('[DEBUG] Starting manga script generation')
 
     const scripts = await generateMangaScripts({
+      markdown: markdownSource.value,
       analysis,
       panelCountA: 4,
       panelCountB: 4,

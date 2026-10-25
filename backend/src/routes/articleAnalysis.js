@@ -61,6 +61,7 @@ router.post('/analyze', async (req, res) => {
 
 const MangaScriptsRequestSchema = z.object({
   // `analysis` may be a parsed object or an incomplete JSON string from the previous AI step.
+  markdown: z.string().min(1).max(100_000),
   analysis: z.union([z.string().min(1).max(100_000), z.record(z.string(), z.unknown())]),
   panelCountA: z.coerce.number().int().min(1).max(12).optional().default(4),
   panelCountB: z.coerce.number().int().min(1).max(12).optional().default(4),
